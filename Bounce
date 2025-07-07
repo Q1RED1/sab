@@ -1,0 +1,521 @@
+-- EVRS Anti Hit Script
+-- Executor script with GUI
+-- Bounces player between corners making them unhittable
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Anti-Hit System
+local AntiHitSystem = {
+    isActive = false,
+    currentTween = nil,
+    corners = {},
+    currentCorner = 1,
+    baseCenter = Vector3.new(0, 10, 0),
+    baseSize = 80,
+    tweenSpeed = 2.5,
+    connections = {},
+    
+    -- Base opening detection
+    baseOpened = false,
+    escapePosition = Vector3.new(0, 100, 0), -- High up escape position
+    escapeSpeed = 1.5,
+    baseDetectionRadius = 100,
+    
+    -- Base parts to monitor (customize these names)
+    basePartNames = {
+        "Base",
+        "BasePart", 
+        "Door",
+        "Gate",
+        "Wall",
+        "Floor"
+    }
+}
+
+-- Create GUI
+local function createGUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "EVRSAntiHitGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = playerGui
+    
+    -- Main Frame
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, 250, 0, 135)
+    mainFrame.Position = UDim2.new(0, 10, 0, 10)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = screenGui
+    
+    -- Corner radius
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = mainFrame
+    
+    -- Gradient
+    local gradient = Instance.new("UIGradient")
+    gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(30, 30, 30)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(15, 15, 15))
+    })
+    gradient.Rotation = 45
+    gradient.Parent = mainFrame
+    
+    -- Title
+    local title = Instance.new("TextLabel")
+    title.Name = "Title"
+    title.Size = UDim2.new(1, 0, 0, 30)
+    title.Position = UDim2.new(0, 0, 0, 5)
+    title.BackgroundTransparency = 1
+    title.Text = "EVRS Anti Hit Script"
+    title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    title.TextScaled = true
+    title.Font = Enum.Font.GothamBold
+    title.Parent = mainFrame
+    
+    -- Status Label
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Name = "StatusLabel"
+    statusLabel.Size = UDim2.new(1, -20, 0, 20)
+    statusLabel.Position = UDim2.new(0, 10, 0, 35)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Status: Inactive"
+    statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+    statusLabel.TextScaled = true
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    statusLabel.Parent = mainFrame
+    
+    -- Base Status Label
+    local baseStatusLabel = Instance.new("TextLabel")
+    baseStatusLabel.Name = "BaseStatusLabel"
+    baseStatusLabel.Size = UDim2.new(1, -20, 0, 15)
+    baseStatusLabel.Position = UDim2.new(0, 10, 0, 50)
+    baseStatusLabel.BackgroundTransparency = 1
+    baseStatusLabel.Text = "Base: Closed"
+    baseStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    baseStatusLabel.TextScaled = true
+    baseStatusLabel.Font = Enum.Font.Gotham
+    baseStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
+    baseStatusLabel.Parent = mainFrame
+    
+    -- Start Button
+    local startButton = Instance.new("TextButton")
+    startButton.Name = "StartButton"
+    startButton.Size = UDim2.new(0, 100, 0, 30)
+    startButton.Position = UDim2.new(0, 15, 0, 75)
+    startButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+    startButton.Text = "Start"
+    startButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    startButton.TextScaled = true
+    startButton.Font = Enum.Font.GothamBold
+    startButton.Parent = mainFrame
+    
+    local startCorner = Instance.new("UICorner")
+    startCorner.CornerRadius = UDim.new(0, 5)
+    startCorner.Parent = startButton
+    
+    -- Stop Button
+    local stopButton = Instance.new("TextButton")
+    stopButton.Name = "StopButton"
+    stopButton.Size = UDim2.new(0, 100, 0, 30)
+    stopButton.Position = UDim2.new(0, 125, 0, 75)
+    stopButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+    stopButton.Text = "Stop"
+    stopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    stopButton.TextScaled = true
+    stopButton.Font = Enum.Font.GothamBold
+    stopButton.Parent = mainFrame
+    
+    local stopCorner = Instance.new("UICorner")
+    stopCorner.CornerRadius = UDim.new(0, 5)
+    stopCorner.Parent = stopButton
+    
+    -- Make GUI draggable
+    local dragStart = nil
+    local startPos = nil
+    
+    local function updateInput(input)
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+    
+    mainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragStart = input.Position
+            startPos = mainFrame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragStart = nil
+                end
+            end)
+        end
+    end)
+    
+    mainFrame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement then
+            if dragStart then
+                updateInput(input)
+            end
+        end
+    end)
+    
+    return screenGui, startButton, stopButton, statusLabel, baseStatusLabel
+end
+
+-- Setup corner positions
+function AntiHitSystem:setupCorners()
+    local base = self.baseCenter
+    local size = self.baseSize
+    
+    self.corners = {
+        -- Ground level corners
+        Vector3.new(base.X - size, base.Y, base.Z - size),     -- Bottom-left
+        Vector3.new(base.X + size, base.Y, base.Z - size),     -- Bottom-right
+        Vector3.new(base.X + size, base.Y, base.Z + size),     -- Top-right
+        Vector3.new(base.X - size, base.Y, base.Z + size),     -- Top-left
+        
+        -- Elevated corners
+        Vector3.new(base.X - size, base.Y + 30, base.Z - size), -- High Bottom-left
+        Vector3.new(base.X + size, base.Y + 30, base.Z - size), -- High Bottom-right
+        Vector3.new(base.X + size, base.Y + 30, base.Z + size), -- High Top-right
+        Vector3.new(base.X - size, base.Y + 30, base.Z + size), -- High Top-left
+    }
+end
+
+-- Detect base opening
+function AntiHitSystem:detectBaseOpening()
+    local character = player.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
+    
+    local rootPart = character.HumanoidRootPart
+    local playerPosition = rootPart.Position
+    
+    -- Check if any base parts are missing or transparency changed
+    for _, partName in pairs(self.basePartNames) do
+        local basePart = workspace:FindFirstChild(partName)
+        if basePart then
+            -- Check if part became transparent (common way bases open)
+            if basePart.Transparency >= 0.5 then
+                return true
+            end
+            
+            -- Check if part was destroyed
+            if not basePart.Parent then
+                return true
+            end
+        end
+    end
+    
+    -- Alternative: Check if player can see sky (no parts above)
+    local raycast = workspace:Raycast(playerPosition, Vector3.new(0, 1000, 0))
+    if not raycast then
+        return true -- No obstruction above, base might be open
+    end
+    
+    return false
+end
+
+-- Escape from base
+function AntiHitSystem:escapeFromBase(rootPart, bodyPosition)
+    if self.baseOpened then return end
+    
+    self.baseOpened = true
+    print("Base detected as open! Escaping...")
+    
+    -- Stop current bouncing
+    if self.currentTween then
+        self.currentTween:Cancel()
+        self.currentTween = nil
+    end
+    
+    -- Calculate escape position (out and up from base)
+    local currentPos = rootPart.Position
+    local escapeDirection = (currentPos - self.baseCenter).Unit
+    
+    -- If too close to center, pick a random direction
+    if escapeDirection.Magnitude < 0.1 then
+        escapeDirection = Vector3.new(math.random(-1, 1), 0, math.random(-1, 1)).Unit
+    end
+    
+    -- Escape position: far from base center and high up
+    local escapePos = self.baseCenter + escapeDirection * (self.baseSize * 2) + Vector3.new(0, 80, 0)
+    
+    -- Create escape tween
+    local escapeInfo = TweenInfo.new(
+        self.escapeSpeed,
+        Enum.EasingStyle.Quad,
+        Enum.EasingDirection.Out,
+        0,
+        false,
+        0
+    )
+    
+    self.currentTween = TweenService:Create(bodyPosition, escapeInfo, {
+        Position = escapePos
+    })
+    
+    self.currentTween:Play()
+    
+    -- After escape, start aerial bouncing
+    local connection
+    connection = self.currentTween.Completed:Connect(function()
+        connection:Disconnect()
+        if self.isActive then
+            self:startAerialBouncing(rootPart, bodyPosition)
+        end
+    end)
+    
+    table.insert(self.connections, connection)
+end
+
+-- Start aerial bouncing pattern
+function AntiHitSystem:startAerialBouncing(rootPart, bodyPosition)
+    -- Create aerial corner positions
+    local aerialCorners = {
+        Vector3.new(self.baseCenter.X - 120, self.baseCenter.Y + 60, self.baseCenter.Z - 120),
+        Vector3.new(self.baseCenter.X + 120, self.baseCenter.Y + 60, self.baseCenter.Z - 120),
+        Vector3.new(self.baseCenter.X + 120, self.baseCenter.Y + 60, self.baseCenter.Z + 120),
+        Vector3.new(self.baseCenter.X - 120, self.baseCenter.Y + 60, self.baseCenter.Z + 120),
+        Vector3.new(self.baseCenter.X - 120, self.baseCenter.Y + 120, self.baseCenter.Z - 120),
+        Vector3.new(self.baseCenter.X + 120, self.baseCenter.Y + 120, self.baseCenter.Z - 120),
+        Vector3.new(self.baseCenter.X + 120, self.baseCenter.Y + 120, self.baseCenter.Z + 120),
+        Vector3.new(self.baseCenter.X - 120, self.baseCenter.Y + 120, self.baseCenter.Z + 120),
+    }
+    
+    self.corners = aerialCorners
+    self.currentCorner = 1
+    self.tweenSpeed = 3 -- Slightly slower for aerial movement
+    
+    print("Starting aerial bouncing pattern...")
+    self:bounceToNextCorner(rootPart, bodyPosition)
+end
+
+-- Start anti-hit system
+function AntiHitSystem:start()
+    if self.isActive then return end
+    
+    local character = player.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then
+        warn("Character not found!")
+        return
+    end
+    
+    local humanoid = character:FindFirstChild("Humanoid")
+    local rootPart = character.HumanoidRootPart
+    
+    self.isActive = true
+    self.baseOpened = false -- Reset base opened state
+    self:setupCorners()
+    
+    -- Disable player controls
+    if humanoid then
+        humanoid.PlatformStand = true
+        humanoid.WalkSpeed = 0
+        humanoid.JumpPower = 0
+    end
+    
+    -- Create BodyPosition for smooth movement
+    local bodyPosition = Instance.new("BodyPosition")
+    bodyPosition.MaxForce = Vector3.new(4000, 4000, 4000)
+    bodyPosition.P = 3000
+    bodyPosition.D = 500
+    bodyPosition.Position = rootPart.Position
+    bodyPosition.Parent = rootPart
+    
+    -- Start base opening detection loop
+    local detectionConnection
+    detectionConnection = RunService.Heartbeat:Connect(function()
+        if not self.isActive then
+            detectionConnection:Disconnect()
+            return
+        end
+        
+        if not self.baseOpened and self:detectBaseOpening() then
+            self:escapeFromBase(rootPart, bodyPosition)
+        end
+    end)
+    
+    table.insert(self.connections, detectionConnection)
+    
+    -- Start bouncing between corners
+    self:bounceToNextCorner(rootPart, bodyPosition)
+    
+    print("EVRS Anti Hit activated with base detection!")
+end
+
+-- Stop anti-hit system
+function AntiHitSystem:stop()
+    if not self.isActive then return end
+    
+    self.isActive = false
+    
+    -- Stop current tween
+    if self.currentTween then
+        self.currentTween:Cancel()
+        self.currentTween = nil
+    end
+    
+    -- Disconnect all connections
+    for _, connection in pairs(self.connections) do
+        connection:Disconnect()
+    end
+    self.connections = {}
+    
+    local character = player.Character
+    if character then
+        local humanoid = character:FindFirstChild("Humanoid")
+        local rootPart = character:FindFirstChild("HumanoidRootPart")
+        
+        -- Restore player controls
+        if humanoid then
+            humanoid.PlatformStand = false
+            humanoid.WalkSpeed = 16
+            humanoid.JumpPower = 50
+        end
+        
+        -- Remove BodyPosition
+        if rootPart then
+            local bodyPosition = rootPart:FindFirstChild("BodyPosition")
+            if bodyPosition then
+                bodyPosition:Destroy()
+            end
+        end
+    end
+    
+    print("EVRS Anti Hit deactivated!")
+end
+
+-- Bounce to next corner
+function AntiHitSystem:bounceToNextCorner(rootPart, bodyPosition)
+    if not self.isActive or not rootPart.Parent then return end
+    
+    local targetCorner = self.corners[self.currentCorner]
+    
+    -- Create tween info
+    local tweenInfo = TweenInfo.new(
+        self.tweenSpeed,
+        Enum.EasingStyle.Sine,
+        Enum.EasingDirection.InOut,
+        0,
+        false,
+        0
+    )
+    
+    -- Create tween
+    self.currentTween = TweenService:Create(bodyPosition, tweenInfo, {
+        Position = targetCorner
+    })
+    
+    -- Start tween
+    self.currentTween:Play()
+    
+    -- When tween completes, go to next corner
+    local connection
+    connection = self.currentTween.Completed:Connect(function()
+        connection:Disconnect()
+        
+        if self.isActive then
+            self.currentCorner = self.currentCorner + 1
+            if self.currentCorner > #self.corners then
+                self.currentCorner = 1
+            end
+            
+            -- Add small delay before next bounce
+            wait(0.1)
+            self:bounceToNextCorner(rootPart, bodyPosition)
+        end
+    end)
+    
+    table.insert(self.connections, connection)
+end
+
+-- Main execution
+local function main()
+    -- Create GUI
+    local gui, startButton, stopButton, statusLabel, baseStatusLabel = createGUI()
+    
+    -- Update status
+    local function updateStatus()
+        if AntiHitSystem.isActive then
+            statusLabel.Text = "Status: Active"
+            statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+        else
+            statusLabel.Text = "Status: Inactive"
+            statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+        end
+        
+        if AntiHitSystem.baseOpened then
+            baseStatusLabel.Text = "Base: Open - Escaped!"
+            baseStatusLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+        else
+            baseStatusLabel.Text = "Base: Closed"
+            baseStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+        end
+    end
+    
+    -- Status update loop
+    local statusConnection
+    statusConnection = RunService.Heartbeat:Connect(function()
+        updateStatus()
+    end)
+    
+    -- Button connections
+    startButton.MouseButton1Click:Connect(function()
+        AntiHitSystem:start()
+        updateStatus()
+    end)
+    
+    stopButton.MouseButton1Click:Connect(function()
+        AntiHitSystem:stop()
+        updateStatus()
+    end)
+    
+    -- Add button hover effects
+    startButton.MouseEnter:Connect(function()
+        startButton.BackgroundColor3 = Color3.fromRGB(0, 180, 0)
+    end)
+    
+    startButton.MouseLeave:Connect(function()
+        startButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+    end)
+    
+    stopButton.MouseEnter:Connect(function()
+        stopButton.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+    end)
+    
+    stopButton.MouseLeave:Connect(function()
+        stopButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
+    end)
+    
+    -- Cleanup when player leaves
+    player.AncestryChanged:Connect(function()
+        if not player.Parent then
+            AntiHitSystem:stop()
+        end
+    end)
+    
+    -- Character respawn handling
+    player.CharacterAdded:Connect(function()
+        if AntiHitSystem.isActive then
+            wait(1)
+            AntiHitSystem:stop()
+            AntiHitSystem:start()
+        end
+    end)
+    
+    updateStatus()
+    print("EVRS Anti Hit Script loaded successfully!")
+end
+
+-- Execute
+main()

@@ -17,12 +17,14 @@ local AntiHitSystem = {
     currentTween = nil,
     connections = {},
     
-    -- Base settings
+    -- Base settings (40x40x20 - length x width x height)
     baseCenter = Vector3.new(0, 10, 0),
-    baseSize = 80,
+    baseLength = 40, -- X-axis
+    baseWidth = 40,  -- Z-axis
+    baseHeight = 20, -- Y-axis
     
     -- Movement settings
-    bounceHeight = 15, -- How high to bounce
+    bounceHeight = 8, -- How high to bounce (within base height)
     bounceSpeed = 0.3, -- Speed of up/down bouncing
     horizontalSpeed = 1.5, -- Speed of left/right movement
     detectionDistance = 20, -- Distance to detect nearby players
@@ -33,12 +35,12 @@ local AntiHitSystem = {
     horizontalDirection = 1, -- 1 for right, -1 for left
     wallCrossing = false,
     
-    -- Wall positions (relative to base center)
+    -- Wall positions (relative to base center) - adjusted for 40x40 base
     walls = {
-        left = Vector3.new(-80, 20, 0),
-        right = Vector3.new(80, 20, 0),
-        front = Vector3.new(0, 20, -80),
-        back = Vector3.new(0, 20, 80)
+        left = Vector3.new(-20, 15, 0),   -- Left wall at X=-20
+        right = Vector3.new(20, 15, 0),   -- Right wall at X=20
+        front = Vector3.new(0, 15, -20),  -- Front wall at Z=-20
+        back = Vector3.new(0, 15, 20)     -- Back wall at Z=20
     }
 }
 
@@ -337,10 +339,10 @@ function AntiHitSystem:startBouncing(rootPart, bodyPosition)
             verticalOffset = -self.bounceHeight
         end
         
-        -- Horizontal movement
-        local horizontalOffset = self.horizontalDirection * 30 -- Move 30 studs left/right
+        -- Horizontal movement (adjusted for 40x40 base)
+        local horizontalOffset = self.horizontalDirection * 15 -- Move 15 studs left/right within base
         
-        -- Calculate new position
+        -- Calculate new position (keeping within base bounds)
         local newPosition = Vector3.new(
             self.baseCenter.X + horizontalOffset,
             self.baseCenter.Y + verticalOffset,
@@ -355,8 +357,8 @@ function AntiHitSystem:startBouncing(rootPart, bodyPosition)
             self.isMovingUp = not self.isMovingUp
         end
         
-        -- Change horizontal direction when hitting boundaries
-        if math.abs(newPosition.X - self.baseCenter.X) > self.baseSize - 10 then
+        -- Change horizontal direction when hitting boundaries (40x40 base)
+        if math.abs(newPosition.X - self.baseCenter.X) > (self.baseLength/2 - 5) then
             self.horizontalDirection = -self.horizontalDirection
         end
         

@@ -19,13 +19,13 @@ local AntiHitSystem = {
     currentCorner = 1,
     baseCenter = Vector3.new(0, 10, 0),
     baseSize = 80,
-    tweenSpeed = 2.5,
+    tweenSpeed = 5.0, -- Increased from 2.5 to 5.0 (slower)
     connections = {},
     
     -- Base opening detection
     baseOpened = false,
     escapePosition = Vector3.new(0, 100, 0), -- High up escape position
-    escapeSpeed = 1.5,
+    escapeSpeed = 3.0, -- Increased from 1.5 to 3.0 (slower)
     baseDetectionRadius = 100,
     
     -- Base parts to monitor (customize these names)
@@ -294,7 +294,7 @@ function AntiHitSystem:startAerialBouncing(rootPart, bodyPosition)
     
     self.corners = aerialCorners
     self.currentCorner = 1
-    self.tweenSpeed = 3 -- Slightly slower for aerial movement
+    self.tweenSpeed = 6.0 -- Increased from 3 to 6.0 (slower aerial movement)
     
     print("Starting aerial bouncing pattern...")
     self:bounceToNextCorner(rootPart, bodyPosition)
@@ -430,8 +430,8 @@ function AntiHitSystem:bounceToNextCorner(rootPart, bodyPosition)
                 self.currentCorner = 1
             end
             
-            -- Add small delay before next bounce
-            wait(0.1)
+            -- Increased delay before next bounce
+            wait(0.25) -- Increased from 0.1 to 0.25 seconds
             self:bounceToNextCorner(rootPart, bodyPosition)
         end
     end)

@@ -1,6 +1,6 @@
--- EVRS Anti Hit Script
--- Executor script with GUI
--- Moves player in directional patterns around base, changing direction when hitting walls
+-- EVRS Anti Hit Script - Fixed Version
+-- Bounces up/down rapidly while moving left/right until player within 20 studs
+-- Then moves across nearest wall to other side of base
 
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
@@ -15,38 +15,30 @@ local playerGui = player:WaitForChild("PlayerGui")
 local AntiHitSystem = {
     isActive = false,
     currentTween = nil,
-    baseCenter = Vector3.new(0, 10, 0),
-    baseSize = 80,
-    tweenSpeed = 3.0,
     connections = {},
     
-    -- Movement system
-    currentDirection = Vector3.new(1, 0, 0), -- Start moving right
-    movementDistance = 40,
-    currentPosition = Vector3.new(0, 10, 0),
+    -- Base settings
+    baseCenter = Vector3.new(0, 10, 0),
+    baseSize = 80,
     
-    -- Base opening detection
-    baseOpened = false,
-    escapeSpeed = 3.0,
+    -- Movement settings
+    bounceHeight = 15, -- How high to bounce
+    bounceSpeed = 0.3, -- Speed of up/down bouncing
+    horizontalSpeed = 1.5, -- Speed of left/right movement
+    detectionDistance = 20, -- Distance to detect nearby players
     
-    -- Movement directions
-    directions = {
-        right = Vector3.new(1, 0, 0),
-        left = Vector3.new(-1, 0, 0),
-        forward = Vector3.new(0, 0, 1),
-        backward = Vector3.new(0, 0, -1),
-        up = Vector3.new(0, 1, 0),
-        down = Vector3.new(0, -1, 0)
-    },
+    -- Current movement state
+    currentPosition = Vector3.new(0, 0, 0),
+    isMovingUp = true,
+    horizontalDirection = 1, -- 1 for right, -1 for left
+    wallCrossing = false,
     
-    -- Base parts to monitor
-    basePartNames = {
-        "Base",
-        "BasePart", 
-        "Door",
-        "Gate",
-        "Wall",
-        "Floor"
+    -- Wall positions (relative to base center)
+    walls = {
+        left = Vector3.new(-80, 20, 0),
+        right = Vector3.new(80, 20, 0),
+        front = Vector3.new(0, 20, -80),
+        back = Vector3.new(0, 20, 80)
     }
 }
 
@@ -60,7 +52,7 @@ local function createGUI()
     -- Main Frame
     local mainFrame = Instance.new("Frame")
     mainFrame.Name = "MainFrame"
-    mainFrame.Size = UDim2.new(0, 250, 0, 150)
+    mainFrame.Size = UDim2.new(0, 280, 0, 160)
     mainFrame.Position = UDim2.new(0, 10, 0, 10)
     mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
     mainFrame.BorderSizePixel = 0
@@ -86,7 +78,7 @@ local function createGUI()
     title.Size = UDim2.new(1, 0, 0, 30)
     title.Position = UDim2.new(0, 0, 0, 5)
     title.BackgroundTransparency = 1
-    title.Text = "EVRS Anti Hit Script"
+    title.Text = "EVRS Anti Hit Script - Fixed"
     title.TextColor3 = Color3.fromRGB(255, 255, 255)
     title.TextScaled = true
     title.Font = Enum.Font.GothamBold
@@ -105,37 +97,37 @@ local function createGUI()
     statusLabel.TextXAlignment = Enum.TextXAlignment.Left
     statusLabel.Parent = mainFrame
     
-    -- Direction Label
-    local directionLabel = Instance.new("TextLabel")
-    directionLabel.Name = "DirectionLabel"
-    directionLabel.Size = UDim2.new(1, -20, 0, 15)
-    directionLabel.Position = UDim2.new(0, 10, 0, 50)
-    directionLabel.BackgroundTransparency = 1
-    directionLabel.Text = "Direction: Right"
-    directionLabel.TextColor3 = Color3.fromRGB(100, 200, 255)
-    directionLabel.TextScaled = true
-    directionLabel.Font = Enum.Font.Gotham
-    directionLabel.TextXAlignment = Enum.TextXAlignment.Left
-    directionLabel.Parent = mainFrame
+    -- Distance Label
+    local distanceLabel = Instance.new("TextLabel")
+    distanceLabel.Name = "DistanceLabel"
+    distanceLabel.Size = UDim2.new(1, -20, 0, 15)
+    distanceLabel.Position = UDim2.new(0, 10, 0, 55)
+    distanceLabel.BackgroundTransparency = 1
+    distanceLabel.Text = "Nearest Player: N/A"
+    distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    distanceLabel.TextScaled = true
+    distanceLabel.Font = Enum.Font.Gotham
+    distanceLabel.TextXAlignment = Enum.TextXAlignment.Left
+    distanceLabel.Parent = mainFrame
     
-    -- Base Status Label
-    local baseStatusLabel = Instance.new("TextLabel")
-    baseStatusLabel.Name = "BaseStatusLabel"
-    baseStatusLabel.Size = UDim2.new(1, -20, 0, 15)
-    baseStatusLabel.Position = UDim2.new(0, 10, 0, 65)
-    baseStatusLabel.BackgroundTransparency = 1
-    baseStatusLabel.Text = "Base: Closed"
-    baseStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-    baseStatusLabel.TextScaled = true
-    baseStatusLabel.Font = Enum.Font.Gotham
-    baseStatusLabel.TextXAlignment = Enum.TextXAlignment.Left
-    baseStatusLabel.Parent = mainFrame
+    -- Mode Label
+    local modeLabel = Instance.new("TextLabel")
+    modeLabel.Name = "ModeLabel"
+    modeLabel.Size = UDim2.new(1, -20, 0, 15)
+    modeLabel.Position = UDim2.new(0, 10, 0, 75)
+    modeLabel.BackgroundTransparency = 1
+    modeLabel.Text = "Mode: Bouncing"
+    modeLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+    modeLabel.TextScaled = true
+    modeLabel.Font = Enum.Font.Gotham
+    modeLabel.TextXAlignment = Enum.TextXAlignment.Left
+    modeLabel.Parent = mainFrame
     
     -- Start Button
     local startButton = Instance.new("TextButton")
     startButton.Name = "StartButton"
-    startButton.Size = UDim2.new(0, 100, 0, 30)
-    startButton.Position = UDim2.new(0, 15, 0, 90)
+    startButton.Size = UDim2.new(0, 120, 0, 35)
+    startButton.Position = UDim2.new(0, 15, 0, 110)
     startButton.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
     startButton.Text = "Start"
     startButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -150,8 +142,8 @@ local function createGUI()
     -- Stop Button
     local stopButton = Instance.new("TextButton")
     stopButton.Name = "StopButton"
-    stopButton.Size = UDim2.new(0, 100, 0, 30)
-    stopButton.Position = UDim2.new(0, 125, 0, 90)
+    stopButton.Size = UDim2.new(0, 120, 0, 35)
+    stopButton.Position = UDim2.new(0, 145, 0, 110)
     stopButton.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
     stopButton.Text = "Stop"
     stopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -193,106 +185,83 @@ local function createGUI()
         end
     end)
     
-    return screenGui, startButton, stopButton, statusLabel, directionLabel, baseStatusLabel
+    return screenGui, startButton, stopButton, statusLabel, distanceLabel, modeLabel
 end
 
--- Check if position hits a wall or boundary
-function AntiHitSystem:checkWallCollision(newPosition)
-    -- Check base boundaries
-    local distanceFromCenter = (newPosition - self.baseCenter).Magnitude
-    if distanceFromCenter > self.baseSize then
-        return true
-    end
-    
-    -- Check for actual parts/walls using raycast
+-- Find nearest player
+function AntiHitSystem:findNearestPlayer()
     local character = player.Character
-    if character and character:FindFirstChild("HumanoidRootPart") then
-        local rootPart = character.HumanoidRootPart
-        local direction = (newPosition - rootPart.Position).Unit
-        local distance = (newPosition - rootPart.Position).Magnitude
-        
-        -- Cast ray in movement direction
-        local raycastParams = RaycastParams.new()
-        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
-        raycastParams.FilterDescendantsInstances = {character}
-        
-        local raycastResult = workspace:Raycast(rootPart.Position, direction * distance, raycastParams)
-        if raycastResult then
-            return true
-        end
-    end
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return nil, math.huge end
     
-    -- Check Y boundaries (height limits)
-    if newPosition.Y < 5 or newPosition.Y > 150 then
-        return true
-    end
+    local rootPart = character.HumanoidRootPart
+    local myPosition = rootPart.Position
     
-    return false
-end
-
--- Get direction name for display
-function AntiHitSystem:getDirectionName(direction)
-    if direction == self.directions.right then return "Right"
-    elseif direction == self.directions.left then return "Left"
-    elseif direction == self.directions.forward then return "Forward"
-    elseif direction == self.directions.backward then return "Backward"
-    elseif direction == self.directions.up then return "Up"
-    elseif direction == self.directions.down then return "Down"
-    else return "Unknown"
-    end
-end
-
--- Change direction when hitting wall
-function AntiHitSystem:changeDirection()
-    local possibleDirections = {
-        self.directions.right,
-        self.directions.left,
-        self.directions.forward,
-        self.directions.backward,
-        self.directions.up,
-        self.directions.down
-    }
+    local nearestPlayer = nil
+    local nearestDistance = math.huge
     
-    -- Remove current direction from possibilities
-    for i, dir in ipairs(possibleDirections) do
-        if dir == self.currentDirection then
-            table.remove(possibleDirections, i)
-            break
-        end
-    end
-    
-    -- Pick random new direction
-    self.currentDirection = possibleDirections[math.random(1, #possibleDirections)]
-    print("Direction changed to:", self:getDirectionName(self.currentDirection))
-end
-
--- Detect base opening
-function AntiHitSystem:detectBaseOpening()
-    local character = player.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    
-    -- Check if any base parts are missing or transparency changed
-    for _, partName in pairs(self.basePartNames) do
-        local basePart = workspace:FindFirstChild(partName)
-        if basePart then
-            if basePart.Transparency >= 0.5 then
-                return true
-            end
-            if not basePart.Parent then
-                return true
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character and otherPlayer.Character:FindFirstChild("HumanoidRootPart") then
+            local distance = (otherPlayer.Character.HumanoidRootPart.Position - myPosition).Magnitude
+            if distance < nearestDistance then
+                nearestDistance = distance
+                nearestPlayer = otherPlayer
             end
         end
     end
     
-    return false
+    return nearestPlayer, nearestDistance
 end
 
--- Escape from base
-function AntiHitSystem:escapeFromBase(rootPart, bodyPosition)
-    if self.baseOpened then return end
+-- Get nearest wall to cross to
+function AntiHitSystem:getNearestWall()
+    local character = player.Character
+    if not character or not character:FindFirstChild("HumanoidRootPart") then return self.walls.right end
     
-    self.baseOpened = true
-    print("Base detected as open! Escaping...")
+    local rootPart = character.HumanoidRootPart
+    local myPosition = rootPart.Position
+    
+    local nearestWall = nil
+    local nearestDistance = math.huge
+    
+    for wallName, wallPos in pairs(self.walls) do
+        local worldWallPos = self.baseCenter + wallPos
+        local distance = (worldWallPos - myPosition).Magnitude
+        if distance < nearestDistance then
+            nearestDistance = distance
+            nearestWall = wallPos
+        end
+    end
+    
+    return nearestWall or self.walls.right
+end
+
+-- Get opposite wall position
+function AntiHitSystem:getOppositeWall(currentWall)
+    for wallName, wallPos in pairs(self.walls) do
+        if wallPos == currentWall then
+            if wallName == "left" then return self.walls.right
+            elseif wallName == "right" then return self.walls.left
+            elseif wallName == "front" then return self.walls.back
+            elseif wallName == "back" then return self.walls.front
+            end
+        end
+    end
+    return self.walls.right -- Default fallback
+end
+
+-- Cross to opposite wall
+function AntiHitSystem:crossToOppositeWall(rootPart, bodyPosition)
+    if self.wallCrossing then return end
+    
+    self.wallCrossing = true
+    print("Player within 20 studs! Crossing to opposite wall...")
+    
+    -- Get nearest wall and its opposite
+    local nearestWall = self:getNearestWall()
+    local oppositeWall = self:getOppositeWall(nearestWall)
+    
+    -- Calculate target position
+    local targetPosition = self.baseCenter + oppositeWall
     
     -- Stop current movement
     if self.currentTween then
@@ -300,12 +269,9 @@ function AntiHitSystem:escapeFromBase(rootPart, bodyPosition)
         self.currentTween = nil
     end
     
-    -- Calculate escape position
-    local escapePos = self.baseCenter + Vector3.new(0, 100, 0)
-    
-    -- Create escape tween
-    local escapeInfo = TweenInfo.new(
-        self.escapeSpeed,
+    -- Create crossing tween
+    local crossingInfo = TweenInfo.new(
+        2.0, -- 2 seconds to cross
         Enum.EasingStyle.Quad,
         Enum.EasingDirection.Out,
         0,
@@ -313,78 +279,91 @@ function AntiHitSystem:escapeFromBase(rootPart, bodyPosition)
         0
     )
     
-    self.currentTween = TweenService:Create(bodyPosition, escapeInfo, {
-        Position = escapePos
+    self.currentTween = TweenService:Create(bodyPosition, crossingInfo, {
+        Position = targetPosition
     })
     
     self.currentTween:Play()
     
-    -- After escape, continue directional movement at higher altitude
+    -- After crossing, resume bouncing
     local connection
     connection = self.currentTween.Completed:Connect(function()
         connection:Disconnect()
+        self.wallCrossing = false
+        self.currentPosition = targetPosition
+        
+        -- Resume bouncing pattern
         if self.isActive then
-            self.currentPosition = escapePos
-            self.baseCenter = Vector3.new(self.baseCenter.X, 100, self.baseCenter.Z) -- Move base center up
-            self.baseSize = 150 -- Increase movement area
-            self:moveInDirection(rootPart, bodyPosition)
+            self:startBouncing(rootPart, bodyPosition)
         end
     end)
     
     table.insert(self.connections, connection)
 end
 
--- Move in current direction
-function AntiHitSystem:moveInDirection(rootPart, bodyPosition)
-    if not self.isActive or not rootPart.Parent then return end
+-- Start bouncing movement
+function AntiHitSystem:startBouncing(rootPart, bodyPosition)
+    if not self.isActive or self.wallCrossing then return end
     
-    -- Calculate next position
-    local nextPosition = self.currentPosition + (self.currentDirection * self.movementDistance)
-    
-    -- Check for wall collision
-    if self:checkWallCollision(nextPosition) then
-        self:changeDirection()
-        nextPosition = self.currentPosition + (self.currentDirection * self.movementDistance)
-        
-        -- If still hitting wall, try opposite direction
-        if self:checkWallCollision(nextPosition) then
-            self.currentDirection = -self.currentDirection
-            nextPosition = self.currentPosition + (self.currentDirection * self.movementDistance)
+    local bounceConnection
+    bounceConnection = RunService.Heartbeat:Connect(function()
+        if not self.isActive or self.wallCrossing then
+            bounceConnection:Disconnect()
+            return
         end
-    end
-    
-    -- Update current position
-    self.currentPosition = nextPosition
-    
-    -- Create tween
-    local tweenInfo = TweenInfo.new(
-        self.tweenSpeed,
-        Enum.EasingStyle.Sine,
-        Enum.EasingDirection.InOut,
-        0,
-        false,
-        0
-    )
-    
-    self.currentTween = TweenService:Create(bodyPosition, tweenInfo, {
-        Position = nextPosition
-    })
-    
-    self.currentTween:Play()
-    
-    -- Continue moving when tween completes
-    local connection
-    connection = self.currentTween.Completed:Connect(function()
-        connection:Disconnect()
         
-        if self.isActive then
-            -- Small delay before next movement
-            wait(0.1)
-            self:moveInDirection(rootPart, bodyPosition)
+        local character = player.Character
+        if not character or not character:FindFirstChild("HumanoidRootPart") then
+            bounceConnection:Disconnect()
+            return
         end
+        
+        -- Check for nearby players
+        local nearestPlayer, distance = self:findNearestPlayer()
+        if distance <= self.detectionDistance then
+            bounceConnection:Disconnect()
+            self:crossToOppositeWall(rootPart, bodyPosition)
+            return
+        end
+        
+        -- Update current position
+        local currentPos = rootPart.Position
+        
+        -- Vertical bouncing
+        local verticalOffset = 0
+        if self.isMovingUp then
+            verticalOffset = self.bounceHeight
+        else
+            verticalOffset = -self.bounceHeight
+        end
+        
+        -- Horizontal movement
+        local horizontalOffset = self.horizontalDirection * 30 -- Move 30 studs left/right
+        
+        -- Calculate new position
+        local newPosition = Vector3.new(
+            self.baseCenter.X + horizontalOffset,
+            self.baseCenter.Y + verticalOffset,
+            self.baseCenter.Z
+        )
+        
+        -- Update body position
+        bodyPosition.Position = newPosition
+        
+        -- Toggle vertical direction every few frames
+        if tick() % (self.bounceSpeed * 2) < 0.03 then
+            self.isMovingUp = not self.isMovingUp
+        end
+        
+        -- Change horizontal direction when hitting boundaries
+        if math.abs(newPosition.X - self.baseCenter.X) > self.baseSize - 10 then
+            self.horizontalDirection = -self.horizontalDirection
+        end
+        
+        self.currentPosition = newPosition
     end)
     
-    table.insert(self.connections, connection)
+    table.insert(self.connections, bounceConnection)
 end
 
 -- Start anti-hit system
@@ -401,9 +380,7 @@ function AntiHitSystem:start()
     local rootPart = character.HumanoidRootPart
     
     self.isActive = true
-    self.baseOpened = false
-    self.currentPosition = rootPart.Position
-    self.currentDirection = self.directions.right -- Start moving right
+    self.wallCrossing = false
     
     -- Disable player controls
     if humanoid then
@@ -420,25 +397,10 @@ function AntiHitSystem:start()
     bodyPosition.Position = rootPart.Position
     bodyPosition.Parent = rootPart
     
-    -- Start base opening detection loop
-    local detectionConnection
-    detectionConnection = RunService.Heartbeat:Connect(function()
-        if not self.isActive then
-            detectionConnection:Disconnect()
-            return
-        end
-        
-        if not self.baseOpened and self:detectBaseOpening() then
-            self:escapeFromBase(rootPart, bodyPosition)
-        end
-    end)
+    -- Start bouncing
+    self:startBouncing(rootPart, bodyPosition)
     
-    table.insert(self.connections, detectionConnection)
-    
-    -- Start directional movement
-    self:moveInDirection(rootPart, bodyPosition)
-    
-    print("EVRS Anti Hit activated with directional movement!")
+    print("EVRS Anti Hit activated with new bouncing pattern!")
 end
 
 -- Stop anti-hit system
@@ -446,6 +408,7 @@ function AntiHitSystem:stop()
     if not self.isActive then return end
     
     self.isActive = false
+    self.wallCrossing = false
     
     -- Stop current tween
     if self.currentTween then
@@ -486,26 +449,39 @@ end
 -- Main execution
 local function main()
     -- Create GUI
-    local gui, startButton, stopButton, statusLabel, directionLabel, baseStatusLabel = createGUI()
+    local gui, startButton, stopButton, statusLabel, distanceLabel, modeLabel = createGUI()
     
     -- Update status
     local function updateStatus()
         if AntiHitSystem.isActive then
             statusLabel.Text = "Status: Active"
             statusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
-            directionLabel.Text = "Direction: " .. AntiHitSystem:getDirectionName(AntiHitSystem.currentDirection)
         else
             statusLabel.Text = "Status: Inactive"
             statusLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
-            directionLabel.Text = "Direction: None"
         end
         
-        if AntiHitSystem.baseOpened then
-            baseStatusLabel.Text = "Base: Open - Escaped!"
-            baseStatusLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+        -- Update distance to nearest player
+        local nearestPlayer, distance = AntiHitSystem:findNearestPlayer()
+        if nearestPlayer then
+            distanceLabel.Text = string.format("Nearest Player: %.1f studs", distance)
+            if distance <= AntiHitSystem.detectionDistance then
+                distanceLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+            else
+                distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            end
         else
-            baseStatusLabel.Text = "Base: Closed"
-            baseStatusLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
+            distanceLabel.Text = "Nearest Player: N/A"
+            distanceLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        end
+        
+        -- Update mode
+        if AntiHitSystem.wallCrossing then
+            modeLabel.Text = "Mode: Wall Crossing"
+            modeLabel.TextColor3 = Color3.fromRGB(255, 255, 100)
+        else
+            modeLabel.Text = "Mode: Bouncing"
+            modeLabel.TextColor3 = Color3.fromRGB(100, 255, 100)
         end
     end
     
@@ -560,7 +536,7 @@ local function main()
     end)
     
     updateStatus()
-    print("EVRS Anti Hit Script loaded successfully!")
+    print("EVRS Anti Hit Script (Fixed Version) loaded successfully!")
 end
 
 -- Execute

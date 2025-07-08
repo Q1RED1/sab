@@ -96,8 +96,8 @@ function GUI:CreateMain()
     
     -- Auto Farm Toggle Button
     local autoFarmButton = Instance.new("TextButton")
-    autoFarmButton.Size = UDim2.new(0, 250, 0, 40)
-    autoFarmButton.Position = UDim2.new(0, 25, 0, 60)
+    autoFarmButton.Size = UDim2.new(0, 120, 0, 40)
+    autoFarmButton.Position = UDim2.new(0, 15, 0, 60)
     autoFarmButton.BackgroundColor3 = Color3.fromRGB(85, 170, 85)
     autoFarmButton.Text = "Auto Farm: OFF"
     autoFarmButton.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -109,6 +109,52 @@ function GUI:CreateMain()
     local farmCorner = Instance.new("UICorner")
     farmCorner.CornerRadius = UDim.new(0, 8)
     farmCorner.Parent = autoFarmButton
+    
+    -- Bounce Button
+    local bounceButton = Instance.new("TextButton")
+    bounceButton.Size = UDim2.new(0, 120, 0, 40)
+    bounceButton.Position = UDim2.new(0, 165, 0, 60)
+    bounceButton.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
+    bounceButton.Text = "Bounce"
+    bounceButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    bounceButton.TextScaled = true
+    bounceButton.Font = Enum.Font.Gotham
+    bounceButton.BorderSizePixel = 0
+    bounceButton.Parent = mainFrame
+    
+    local bounceCorner = Instance.new("UICorner")
+    bounceCorner.CornerRadius = UDim.new(0, 8)
+    bounceCorner.Parent = bounceButton
+    
+    -- Bounce Button Click
+    bounceButton.MouseButton1Click:Connect(function()
+        bounceButton.Text = "Loading..."
+        bounceButton.BackgroundColor3 = Color3.fromRGB(200, 200, 200)
+        
+        spawn(function()
+            -- Load and execute the bounce script
+            local success, result = pcall(function()
+                local bounceScript = game:HttpGet("https://raw.githubusercontent.com/Q1RED1/sab/refs/heads/main/Bounce")
+                loadstring(bounceScript)()
+            end)
+            
+            if success then
+                bounceButton.Text = "Bounce ✓"
+                bounceButton.BackgroundColor3 = Color3.fromRGB(85, 170, 85)
+                statusLabel.Text = "Status: Bounce script loaded!"
+            else
+                bounceButton.Text = "Error"
+                bounceButton.BackgroundColor3 = Color3.fromRGB(255, 85, 85)
+                statusLabel.Text = "Status: Failed to load bounce script"
+                print("Bounce script error:", result)
+            end
+            
+            -- Reset button after 2 seconds
+            wait(2)
+            bounceButton.Text = "Bounce"
+            bounceButton.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
+        end)
+    end)
     
     -- Status Label
     local statusLabel = Instance.new("TextLabel")

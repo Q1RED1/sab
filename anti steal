@@ -1,0 +1,607 @@
+-- Enhanced Roblox Corner Bot with Saved Position System
+-- Features: Corner tweening, player detection, wall sliding, brainrot collection, saved position return
+-- Base dimensions: 40x40x20 (L x W x H)
+
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+
+-- Bot Configuration
+local Config = {
+    -- Movement settings
+    baseHeight = 20, -- Base height (from your specs)
+    baseLength = 40, -- Base length
+    baseWidth = 40, -- Base width
+    cornerDistance = 25, -- Distance from center to corners (half of base dimensions)
+    playerDetectionRange = 15, -- Detection range for other players
+    tweenSpeed = 2, -- Base tween speed
+    wallSlideSpeed = 1.5, -- Speed when sliding along walls
+    
+    -- GUI settings
+    guiSize = Vector2.new(300, 200), -- Increased for new buttons
+    cornerRadius = 16,
+    
+    -- Colors
+    colors = {
+        primary = Color3.fromRGB(220, 53, 69), -- Bootstrap red
+        secondary = Color3.fromRGB(40, 44, 52), -- Dark background
+        accent = Color3.fromRGB(255, 255, 255), -- White text
+        success = Color3.fromRGB(40, 167, 69), -- Green
+        warning = Color3.fromRGB(255, 193, 7), -- Yellow
+        info = Color3.fromRGB(23, 162, 184) -- Blue
+    }
+}
+
+-- Bot State
+local BotState = {
+    active = false,
+    currentCorner = 1,
+    isAvoidingPlayer = false,
+    currentTween = nil,
+    avoidanceConnection = nil,
+    corners = {},
+    basePosition = nil,
+    savedPosition = nil, -- Saved position for return
+    brainrotCollected = false,
+    returningToSaved = false -- Flag for return to saved position
+}
+
+-- Corner Bot Class
+local CornerBot = {}
+CornerBot.__index = CornerBot
+
+function CornerBot:new()
+    local bot = setmetatable({}, CornerBot)
+    bot:init()
+    return bot
+end
+
+function CornerBot:init()
+    self:calculateCorners()
+    self:setSavedPosition() -- Initialize saved position
+    self:createGUI()
+    self:setupConnections()
+    self:showAntiStealNotification() -- Show anti-steal notification
+    print("Enhanced Corner Bot initialized!")
+    print("Base dimensions: 40x40x20 (L x W x H)")
+end
+
+function CornerBot:setSavedPosition()
+    -- Set saved position to current position
+    BotState.savedPosition = HumanoidRootPart.Position
+    print("Saved position set to:", BotState.savedPosition)
+end
+
+function CornerBot:resetSavedPosition()
+    -- Reset saved position to current position
+    BotState.savedPosition = HumanoidRootPart.Position
+    print("Saved position reset to:", BotState.savedPosition)
+    self:updateStatus("Saved position reset!")
+    
+    -- Visual feedback
+    if self.GUI and self.GUI.ResetButton then
+        local originalColor = self.GUI.ResetButton.BackgroundColor3
+        self.GUI.ResetButton.BackgroundColor3 = Config.colors.success
+        spawn(function()
+            wait(0.3)
+            self.GUI.ResetButton.BackgroundColor3 = originalColor
+        end)
+    end
+end
+
+function CornerBot:returnToSavedPosition()
+    -- Return to the saved position
+    if not BotState.savedPosition then
+        self:updateStatus("No saved position set!")
+        return
+    end
+    
+    if BotState.returningToSaved then
+        self:updateStatus("Already returning to saved position!")
+        return
+    end
+    
+    BotState.returningToSaved = true
+    self:updateStatus("Returning to saved position...")
+    
+    -- Stop current activities
+    if BotState.currentTween then
+        BotState.currentTween:Cancel()
+        BotState.currentTween = nil
+    end
+    
+    -- Tween to saved position
+    self:tweenToPosition(BotState.savedPosition, Config.tweenSpeed, function()
+        BotState.returningToSaved = false
+        self:updateStatus("Returned to saved position!")
+        
+        -- Visual feedback
+        if self.GUI and self.GUI.ReturnButton then
+            local originalColor = self.GUI.ReturnButton.BackgroundColor3
+            self.GUI.ReturnButton.BackgroundColor3 = Config.colors.success
+            spawn(function()
+                wait(0.3)
+                self.GUI.ReturnButton.BackgroundColor3 = originalColor
+            end)
+        end
+    end)
+end
+
+function CornerBot:calculateCorners()
+    -- Calculate 4 corners around the base center (40x40x20)
+    local center = HumanoidRootPart.Position
+    local halfLength = Config.baseLength / 2 -- 20 studs
+    local halfWidth = Config.baseWidth / 2 -- 20 studs
+    local height = Config.baseHeight + 5 -- 25 studs (base height + clearance)
+    
+    BotState.corners = {
+        center + Vector3.new(halfLength, height, halfWidth),   -- Top-right corner
+        center + Vector3.new(-halfLength, height, halfWidth),  -- Top-left corner
+        center + Vector3.new(-halfLength, height, -halfWidth), -- Bottom-left corner
+        center + Vector3.new(halfLength, height, -halfWidth)   -- Bottom-right corner
+    }
+    
+    BotState.basePosition = center
+    print("Base corners calculated for 40x40x20 base")
+end
+
+function CornerBot:createGUI()
+    -- Remove existing GUI
+    if CoreGui:FindFirstChild("CornerBotGUI") then
+        CoreGui:FindFirstChild("CornerBotGUI"):Destroy()
+    end
+    
+    -- Create ScreenGui
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "CornerBotGUI"
+    screenGui.Parent = CoreGui
+    screenGui.ResetOnSpawn = false
+    
+    -- Main Frame
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Name = "MainFrame"
+    mainFrame.Size = UDim2.new(0, Config.guiSize.X, 0, Config.guiSize.Y)
+    mainFrame.Position = UDim2.new(0, 20, 0, 20)
+    mainFrame.BackgroundColor3 = Config.colors.primary
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Parent = screenGui
+    
+    -- Main frame corner radius
+    local mainCorner = Instance.new("UICorner")
+    mainCorner.CornerRadius = UDim.new(0, Config.cornerRadius)
+    mainCorner.Parent = mainFrame
+    
+    -- Drop shadow effect
+    local shadow = Instance.new("Frame")
+    shadow.Name = "Shadow"
+    shadow.Size = UDim2.new(1, 6, 1, 6)
+    shadow.Position = UDim2.new(0, 3, 0, 3)
+    shadow.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    shadow.BackgroundTransparency = 0.8
+    shadow.BorderSizePixel = 0
+    shadow.ZIndex = mainFrame.ZIndex - 1
+    shadow.Parent = screenGui
+    
+    local shadowCorner = Instance.new("UICorner")
+    shadowCorner.CornerRadius = UDim.new(0, Config.cornerRadius)
+    shadowCorner.Parent = shadow
+    
+    -- Inner container
+    local container = Instance.new("Frame")
+    container.Size = UDim2.new(1, -8, 1, -8)
+    container.Position = UDim2.new(0, 4, 0, 4)
+    container.BackgroundColor3 = Config.colors.secondary
+    container.BorderSizePixel = 0
+    container.Parent = mainFrame
+    
+    local containerCorner = Instance.new("UICorner")
+    containerCorner.CornerRadius = UDim.new(0, Config.cornerRadius - 4)
+    containerCorner.Parent = container
+    
+    -- Title
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 30)
+    title.Position = UDim2.new(0, 0, 0, 5)
+    title.BackgroundTransparency = 1
+    title.Text = "🔄 Enhanced Corner Bot"
+    title.TextColor3 = Config.colors.accent
+    title.TextScaled = true
+    title.Font = Enum.Font.GothamBold
+    title.Parent = container
+    
+    -- Status label
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, -20, 0, 20)
+    statusLabel.Position = UDim2.new(0, 10, 0, 35)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Status: Idle"
+    statusLabel.TextColor3 = Config.colors.accent
+    statusLabel.TextScaled = true
+    statusLabel.Font = Enum.Font.Gotham
+    statusLabel.TextTransparency = 0.3
+    statusLabel.Parent = container
+    
+    -- First button row (Start/Stop)
+    local buttonContainer1 = Instance.new("Frame")
+    buttonContainer1.Size = UDim2.new(1, -20, 0, 35)
+    buttonContainer1.Position = UDim2.new(0, 10, 0, 65)
+    buttonContainer1.BackgroundTransparency = 1
+    buttonContainer1.Parent = container
+    
+    -- Start Button
+    local startButton = Instance.new("TextButton")
+    startButton.Size = UDim2.new(0.48, 0, 1, 0)
+    startButton.Position = UDim2.new(0, 0, 0, 0)
+    startButton.BackgroundColor3 = Config.colors.success
+    startButton.Text = "▶ START"
+    startButton.TextColor3 = Config.colors.accent
+    startButton.TextScaled = true
+    startButton.Font = Enum.Font.GothamBold
+    startButton.BorderSizePixel = 0
+    startButton.Parent = buttonContainer1
+    
+    local startCorner = Instance.new("UICorner")
+    startCorner.CornerRadius = UDim.new(0, 8)
+    startCorner.Parent = startButton
+    
+    -- Stop Button
+    local stopButton = Instance.new("TextButton")
+    stopButton.Size = UDim2.new(0.48, 0, 1, 0)
+    stopButton.Position = UDim2.new(0.52, 0, 0, 0)
+    stopButton.BackgroundColor3 = Config.colors.primary
+    stopButton.Text = "⏹ STOP"
+    stopButton.TextColor3 = Config.colors.accent
+    stopButton.TextScaled = true
+    stopButton.Font = Enum.Font.GothamBold
+    stopButton.BorderSizePixel = 0
+    stopButton.Parent = buttonContainer1
+    
+    local stopCorner = Instance.new("UICorner")
+    stopCorner.CornerRadius = UDim.new(0, 8)
+    stopCorner.Parent = stopButton
+    
+    -- Second button row (Return/Reset)
+    local buttonContainer2 = Instance.new("Frame")
+    buttonContainer2.Size = UDim2.new(1, -20, 0, 35)
+    buttonContainer2.Position = UDim2.new(0, 10, 0, 110)
+    buttonContainer2.BackgroundTransparency = 1
+    buttonContainer2.Parent = container
+    
+    -- Return to Saved Button
+    local returnButton = Instance.new("TextButton")
+    returnButton.Size = UDim2.new(0.48, 0, 1, 0)
+    returnButton.Position = UDim2.new(0, 0, 0, 0)
+    returnButton.BackgroundColor3 = Config.colors.info
+    returnButton.Text = "🏠 RETURN"
+    returnButton.TextColor3 = Config.colors.accent
+    returnButton.TextScaled = true
+    returnButton.Font = Enum.Font.GothamBold
+    returnButton.BorderSizePixel = 0
+    returnButton.Parent = buttonContainer2
+    
+    local returnCorner = Instance.new("UICorner")
+    returnCorner.CornerRadius = UDim.new(0, 8)
+    returnCorner.Parent = returnButton
+    
+    -- Reset Saved Position Button
+    local resetButton = Instance.new("TextButton")
+    resetButton.Size = UDim2.new(0.48, 0, 1, 0)
+    resetButton.Position = UDim2.new(0.52, 0, 0, 0)
+    resetButton.BackgroundColor3 = Config.colors.warning
+    resetButton.Text = "📍 RESET"
+    resetButton.TextColor3 = Config.colors.accent
+    resetButton.TextScaled = true
+    resetButton.Font = Enum.Font.GothamBold
+    resetButton.BorderSizePixel = 0
+    resetButton.Parent = buttonContainer2
+    
+    local resetCorner = Instance.new("UICorner")
+    resetCorner.CornerRadius = UDim.new(0, 8)
+    resetCorner.Parent = resetButton
+    
+    -- Position info label
+    local positionLabel = Instance.new("TextLabel")
+    positionLabel.Size = UDim2.new(1, -20, 0, 20)
+    positionLabel.Position = UDim2.new(0, 10, 0, 155)
+    positionLabel.BackgroundTransparency = 1
+    positionLabel.Text = "Base: 40x40x20"
+    positionLabel.TextColor3 = Config.colors.accent
+    positionLabel.TextScaled = true
+    positionLabel.Font = Enum.Font.Gotham
+    positionLabel.TextTransparency = 0.5
+    positionLabel.Parent = container
+    
+    -- Button functionality
+    startButton.MouseButton1Click:Connect(function()
+        self:startBot()
+    end)
+    
+    stopButton.MouseButton1Click:Connect(function()
+        self:stopBot()
+    end)
+    
+    returnButton.MouseButton1Click:Connect(function()
+        self:returnToSavedPosition()
+    end)
+    
+    resetButton.MouseButton1Click:Connect(function()
+        self:resetSavedPosition()
+    end)
+    
+    -- Make GUI draggable
+    self:makeDraggable(mainFrame, shadow)
+    
+    -- Store references
+    self.GUI = {
+        MainFrame = mainFrame,
+        Shadow = shadow,
+        StatusLabel = statusLabel,
+        StartButton = startButton,
+        StopButton = stopButton,
+        ReturnButton = returnButton,
+        ResetButton = resetButton,
+        PositionLabel = positionLabel
+    }
+end
+
+function CornerBot:makeDraggable(frame, shadow)
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    local isMobile = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
+    
+    local function updateDrag(input)
+        if dragging then
+            local delta = input.Position - dragStart
+            local newPos = UDim2.new(
+                startPos.X.Scale,
+                startPos.X.Offset + delta.X,
+                startPos.Y.Scale,
+                startPos.Y.Offset + delta.Y
+            )
+            frame.Position = newPos
+            if shadow then
+                shadow.Position = UDim2.new(
+                    newPos.X.Scale,
+                    newPos.X.Offset + 3,
+                    newPos.Y.Scale,
+                    newPos.Y.Offset + 3
+                )
+            end
+        end
+    end
+    
+    -- Mouse/Touch input
+    frame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or 
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = frame.Position
+        end
+    end)
+    
+    frame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or
+           input.UserInputType == Enum.UserInputType.Touch then
+            updateDrag(input)
+        end
+    end)
+    
+    frame.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or
+           input.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+    
+    -- Global input handling for mobile
+    if isMobile then
+        UserInputService.InputChanged:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch then
+                updateDrag(input)
+            end
+        end)
+        
+        UserInputService.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch then
+                dragging = false
+            end
+        end)
+    end
+end
+
+function CornerBot:setupConnections()
+    -- Character respawn handling
+    Player.CharacterAdded:Connect(function(newCharacter)
+        Character = newCharacter
+        HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+        self:calculateCorners()
+        if BotState.active then
+            self:stopBot()
+        end
+    end)
+end
+
+function CornerBot:startBot()
+    if BotState.active then return end
+    
+    BotState.active = true
+    BotState.currentCorner = 1
+    BotState.brainrotCollected = false
+    
+    self:updateStatus("Starting corner movement...")
+    self.GUI.StartButton.BackgroundColor3 = Config.colors.warning
+    self.GUI.StartButton.Text = "⏳ RUNNING"
+    
+    self:beginCornerMovement()
+end
+
+function CornerBot:stopBot()
+    if not BotState.active then return end
+    
+    BotState.active = false
+    BotState.isAvoidingPlayer = false
+    BotState.returningToSaved = false
+    
+    -- Stop current tween
+    if BotState.currentTween then
+        BotState.currentTween:Cancel()
+        BotState.currentTween = nil
+    end
+    
+    -- Disconnect avoidance
+    if BotState.avoidanceConnection then
+        BotState.avoidanceConnection:Disconnect()
+        BotState.avoidanceConnection = nil
+    end
+    
+    self:updateStatus("Stopped")
+    self.GUI.StartButton.BackgroundColor3 = Config.colors.success
+    self.GUI.StartButton.Text = "▶ START"
+end
+
+function CornerBot:updateStatus(text)
+    if self.GUI and self.GUI.StatusLabel then
+        self.GUI.StatusLabel.Text = "Status: " .. text
+    end
+end
+
+function CornerBot:beginCornerMovement()
+    if not BotState.active or BotState.returningToSaved then return end
+    
+    self:updateStatus("Moving to corner " .. BotState.currentCorner)
+    
+    -- Check if base lock is over (placeholder - customize for your game)
+    if self:isBaseLockOver() then
+        self:collectBrainrot()
+        return
+    end
+    
+    -- Start player detection
+    self:startPlayerDetection()
+    
+    -- Tween to next corner
+    local targetCorner = BotState.corners[BotState.currentCorner]
+    self:tweenToPosition(targetCorner, Config.tweenSpeed, function()
+        if not BotState.active then return end
+        
+        -- Move to next corner
+        BotState.currentCorner = BotState.currentCorner + 1
+        if BotState.currentCorner > #BotState.corners then
+            BotState.currentCorner = 1
+        end
+        
+        -- Continue movement
+        spawn(function()
+            wait(0.5)
+            self:beginCornerMovement()
+        end)
+    end)
+end
+
+function CornerBot:startPlayerDetection()
+    if BotState.avoidanceConnection then
+        BotState.avoidanceConnection:Disconnect()
+    end
+    
+    BotState.avoidanceConnection = RunService.Heartbeat:Connect(function()
+        if not BotState.active or BotState.isAvoidingPlayer or BotState.returningToSaved then return end
+        
+        local nearbyPlayer = self:getNearbyPlayer()
+        if nearbyPlayer then
+            self:avoidPlayer(nearbyPlayer)
+        end
+    end)
+end
+
+function CornerBot:getNearbyPlayer()
+    local myPosition = HumanoidRootPart.Position
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= Player and player.Character then
+            local otherRoot = player.Character:FindFirstChild("HumanoidRootPart")
+            if otherRoot then
+                local distance = (myPosition - otherRoot.Position).Magnitude
+                if distance <= Config.playerDetectionRange then
+                    return player
+                end
+            end
+        end
+    end
+    
+    return nil
+end
+
+function CornerBot:avoidPlayer(player)
+    if BotState.isAvoidingPlayer then return end
+    
+    BotState.isAvoidingPlayer = true
+    self:updateStatus("Avoiding player: " .. player.Name)
+    
+    -- Cancel current tween
+    if BotState.currentTween then
+        BotState.currentTween:Cancel()
+    end
+    
+    -- Find wall position to slide along
+    local wallPosition = self:findWallSlidePosition()
+    
+    -- Slide along wall
+    self:tweenToPosition(wallPosition, Config.wallSlideSpeed, function()
+        -- Appear on other side
+        local otherSide = self:findOtherSidePosition()
+        HumanoidRootPart.CFrame = CFrame.new(otherSide)
+        
+        -- Wait and resume normal movement
+        spawn(function()
+            wait(1)
+            BotState.isAvoidingPlayer = false
+            self:beginCornerMovement()
+        end)
+    end)
+end
+
+function CornerBot:findWallSlidePosition()
+    -- Find a position along the wall (adapted for 40x40 base)
+    local currentPos = HumanoidRootPart.Position
+    local wallOffset = Vector3.new(Config.baseLength + 10, Config.baseHeight + 5, 0)
+    return currentPos + wallOffset
+end
+
+function CornerBot:findOtherSidePosition()
+    -- Find position on other side (adapted for 40x40 base)
+    local currentPos = HumanoidRootPart.Position
+    local otherSideOffset = Vector3.new(-(Config.baseLength + 20), Config.baseHeight + 5, 0)
+    return currentPos + otherSideOffset
+end
+
+function CornerBot:tweenToPosition(targetPosition, speed, callback)
+    local tweenInfo = TweenInfo.new(
+        speed,
+        Enum.EasingStyle.Quad,
+        Enum.EasingDirection.InOut
+    )
+    
+    BotState.currentTween = TweenService:Create(
+        HumanoidRootPart,
+        tweenInfo,
+        {CFrame = CFrame.new(targetPosition)}
+    )
+    
+    if callback then
+        BotState.currentTween.Completed:Connect(callback)
+    end
+    
+    BotState.currentTween:Play()
+end
+
+function CornerBot:isBaseLockOver()
+    -- 

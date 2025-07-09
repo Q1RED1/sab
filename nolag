@@ -1,0 +1,86 @@
+--// Potato Graphics Toggle GUI (Executor Ready)
+
+-- Create GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "PotatoGraphicsGUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = game:GetService("CoreGui")
+
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "ToggleButton"
+ToggleButton.Size = UDim2.new(0, 100, 0, 40)
+ToggleButton.Position = UDim2.new(0, 10, 0.5, -20) -- middle-left
+ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.Text = "Low GFX: OFF"
+ToggleButton.Parent = ScreenGui
+
+-- Variables
+local lowGFX = false
+
+-- Function to apply potato graphics
+local function applyPotatoGraphics()
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("Texture") or obj:IsA("Decal") or obj:IsA("SurfaceAppearance") then
+            obj:Destroy()
+        elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") then
+            obj:Destroy()
+        elseif obj:IsA("MeshPart") then
+            obj.TextureID = ""
+        end
+    end
+
+    if workspace:FindFirstChildOfClass("Terrain") then
+        local terrain = workspace:FindFirstChildOfClass("Terrain")
+        terrain.WaterWaveSize = 0
+        terrain.WaterWaveSpeed = 0
+        terrain.WaterReflectance = 0
+        terrain.WaterTransparency = 1
+        terrain.Decorations = false
+    end
+
+    local Lighting = game:GetService("Lighting")
+    Lighting.GlobalShadows = false
+    Lighting.FogEnd = 1e10
+    Lighting.Brightness = 0
+    Lighting.EnvironmentDiffuseScale = 0
+    Lighting.EnvironmentSpecularScale = 0
+    Lighting.OutdoorAmbient = Color3.fromRGB(128, 128, 128)
+    Lighting.Ambient = Color3.fromRGB(128, 128, 128)
+
+    for _, v in pairs(Lighting:GetChildren()) do
+        if v:IsA("PostEffect") then
+            v:Destroy()
+        end
+    end
+
+    local cam = workspace.CurrentCamera
+    for _, v in pairs(cam:GetChildren()) do
+        if v:IsA("PostEffect") then
+            v:Destroy()
+        end
+    end
+end
+
+-- Function to reset some visual settings (basic restore)
+local function restoreGraphics()
+    local Lighting = game:GetService("Lighting")
+    Lighting.GlobalShadows = true
+    Lighting.Brightness = 2
+    Lighting.FogEnd = 100000
+    Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+end
+
+-- Toggle button logic
+ToggleButton.MouseButton1Click:Connect(function()
+    lowGFX = not lowGFX
+    if lowGFX then
+        applyPotatoGraphics()
+        ToggleButton.Text = "Low GFX: ON"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(20, 120, 20)
+    else
+        restoreGraphics()
+        ToggleButton.Text = "Low GFX: OFF"
+        ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    end
+end)

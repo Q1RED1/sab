@@ -1,0 +1,47 @@
+--// Low Player Server Hopper for "Steal a Brainrot"
+--// Executor-ready | Works with Synapse X, KRNL, etc.
+
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+local Player = game.Players.LocalPlayer
+
+-- Game you're targeting: "Steal a Brainrot"
+local PlaceId = 109983668079237  -- Replace if needed
+
+local function findLowServer()
+    local cursor = ""
+    local lowestServerId = nil
+    local lowestPlayerCount = math.huge
+
+    repeat
+        local url = "https://games.roblox.com/v1/games/"..PlaceId.."/servers/Public?sortOrder=Asc&limit=100"..(cursor ~= "" and "&cursor="..cursor or "")
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(game:HttpGet(url))
+        end)
+
+        if success and result and result.data then
+            for _, server in ipairs(result.data) do
+                if server.playing < lowestPlayerCount and server.id ~= game.JobId then
+                    lowestPlayerCount = server.playing
+                    lowestServerId = server.id
+                end
+            end
+            cursor = result.nextPageCursor
+        else
+            warn("Failed to get server list.")
+            break
+        end
+        wait(0.5)
+    until cursor == nil or lowestServerId ~= nil
+
+    return lowestServerId
+end
+
+-- Main Logic
+local serverId = findLowServer()
+if serverId then
+    TeleportService:TeleportToPlaceInstance(PlaceId, serverId, Player)
+    print("🔁 Teleporting to server with "..serverId)
+else
+    warn("❌ Failed to find a suitable server.")
+end

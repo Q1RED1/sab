@@ -1,0 +1,398 @@
+-- Base Wall Bouncing Script with GUI
+-- Assumes base is 40x40x20 (width x depth x height)
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+-- Base configuration
+local BASE_SIZE = {
+    Width = 40,
+    Depth = 40,
+    Height = 20
+}
+
+-- Base center is set to player's position when script starts
+local BASE_CENTER = nil
+
+-- Calculate back wall positions
+local BACK_WALL_Z = 0
+local FRONT_WALL_Z = 0
+
+-- Script state
+local scriptEnabled = false
+local currentSide = true
+local isMoving = false
+local savedPosition = nil
+local connection = nil
+
+-- Bounce configuration
+local bounceHeight = 5
+local bounceSpeed = 2
+local detectionDistance = 10
+local returnTweenTime = 3 -- Slow tween back to saved position
+
+-- Create GUI
+local function createGUI()
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "BouncingScriptGUI"
+    screenGui.Parent = playerGui
+    
+    -- Main frame
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Size = UDim2.new(0, 200, 0, 150)
+    mainFrame.Position = UDim2.new(0, 10, 0, 10)
+    mainFrame.BackgroundColor3 = Color3.new(0.2, 0.2, 0.2)
+    mainFrame.BorderSizePixel = 2
+    mainFrame.BorderColor3 = Color3.new(0.5, 0.5, 0.5)
+    mainFrame.Parent = screenGui
+    
+    -- Make frame draggable
+    local UserInputService = game:GetService("UserInputService")
+    local dragging = false
+    local dragStart = nil
+    local startPos = nil
+    
+    local function updateInput(input)
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+    
+    mainFrame.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = input.Position
+            startPos = mainFrame.Position
+            
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
+        end
+    end)
+    
+    mainFrame.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            if dragging then
+                updateInput(input)
+            end
+        end
+    end)
+    
+    UserInputService.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            if dragging then
+                updateInput(input)
+            end
+        end
+    end)
+    
+    -- Title (also acts as drag handle)
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, 0, 0, 30)
+    title.Position = UDim2.new(0, 0, 0, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "Base Bouncer (Drag to Move)"
+    title.TextColor3 = Color3.new(1, 1, 1)
+    title.TextScaled = true
+    title.Font = Enum.Font.SourceSansBold
+    title.Parent = mainFrame
+    
+    -- On/Off Button
+    local onOffButton = Instance.new("TextButton")
+    onOffButton.Size = UDim2.new(1, -10, 0, 30)
+    onOffButton.Position = UDim2.new(0, 5, 0, 35)
+    onOffButton.BackgroundColor3 = Color3.new(0.8, 0.2, 0.2)
+    onOffButton.Text = "OFF"
+    onOffButton.TextColor3 = Color3.new(1, 1, 1)
+    onOffButton.TextScaled = true
+    onOffButton.Font = Enum.Font.SourceSansBold
+    onOffButton.Parent = mainFrame
+    
+    -- Save Position Button
+    local savePositionButton = Instance.new("TextButton")
+    savePositionButton.Size = UDim2.new(1, -10, 0, 30)
+    savePositionButton.Position = UDim2.new(0, 5, 0, 70)
+    savePositionButton.BackgroundColor3 = Color3.new(0.2, 0.6, 0.2)
+    savePositionButton.Text = "Save Position"
+    savePositionButton.TextColor3 = Color3.new(1, 1, 1)
+    savePositionButton.TextScaled = true
+    savePositionButton.Font = Enum.Font.SourceSans
+    savePositionButton.Parent = mainFrame
+    
+    -- Change Position Button
+    local changePositionButton = Instance.new("TextButton")
+    changePositionButton.Size = UDim2.new(1, -10, 0, 30)
+    changePositionButton.Position = UDim2.new(0, 5, 0, 105)
+    changePositionButton.BackgroundColor3 = Color3.new(0.2, 0.4, 0.8)
+    changePositionButton.Text = "Change Position"
+    changePositionButton.TextColor3 = Color3.new(1, 1, 1)
+    changePositionButton.TextScaled = true
+    changePositionButton.Font = Enum.Font.SourceSans
+    changePositionButton.Parent = mainFrame
+    
+    return screenGui, onOffButton, savePositionButton, changePositionButton
+end
+
+-- Function to update wall positions
+local function updateWallPositions()
+    if BASE_CENTER then
+        BACK_WALL_Z = BASE_CENTER.Z - BASE_SIZE.Depth/2
+        FRONT_WALL_Z = BASE_CENTER.Z + BASE_SIZE.Depth/2
+    end
+end
+
+-- Function to get wall position based on side
+local function getWallPosition(side)
+    if not BASE_CENTER then return Vector3.new(0, 0, 0) end
+    
+    local x = side and (BASE_CENTER.X - BASE_SIZE.Width/2 + 2) or (BASE_CENTER.X + BASE_SIZE.Width/2 - 2)
+    local y = BASE_CENTER.Y + BASE_SIZE.Height/2
+    local z = BACK_WALL_Z + 1 -- Slightly in front of the back wall
+    return Vector3.new(x, y, z)
+end
+
+-- Function to check if other players are nearby
+local function checkForNearbyPlayers()
+    if not scriptEnabled then return false end
+    
+    local playerPosition = rootPart.Position
+    
+    for _, otherPlayer in pairs(Players:GetPlayers()) do
+        if otherPlayer ~= player and otherPlayer.Character then
+            local otherRootPart = otherPlayer.Character:FindFirstChild("HumanoidRootPart")
+            if otherRootPart then
+                local distance = (playerPosition - otherRootPart.Position).Magnitude
+                if distance < detectionDistance then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+-- Function to move to opposite side
+local function moveToOppositeSide()
+    if isMoving or not scriptEnabled then return end
+    
+    isMoving = true
+    currentSide = not currentSide
+    
+    local targetPosition = getWallPosition(currentSide)
+    
+    -- Create tween to move to opposite side
+    local tweenInfo = TweenInfo.new(1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = TweenService:Create(rootPart, tweenInfo, {Position = targetPosition})
+    
+    tween:Play()
+    tween.Completed:Connect(function()
+        isMoving = false
+    end)
+end
+
+-- Function to return to saved position with slow tween
+local function returnToSavedPosition()
+    if isMoving or not savedPosition or not scriptEnabled then return end
+    
+    isMoving = true
+    
+    -- Create slow tween back to saved position
+    local tweenInfo = TweenInfo.new(returnTweenTime, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local tween = TweenService:Create(rootPart, tweenInfo, {Position = savedPosition})
+    
+    tween:Play()
+    tween.Completed:Connect(function()
+        isMoving = false
+    end)
+end
+
+-- Function to create bouncing effect
+local function createBounceEffect()
+    if not scriptEnabled then return end
+    
+    local currentPos = rootPart.Position
+    local bounceTarget = currentPos + Vector3.new(0, bounceHeight, 0)
+    
+    -- Up tween
+    local upTween = TweenService:Create(
+        rootPart,
+        TweenInfo.new(0.5/bounceSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+        {Position = bounceTarget}
+    )
+    
+    upTween:Play()
+    upTween.Completed:Connect(function()
+        if scriptEnabled then
+            -- Down tween
+            local downTween = TweenService:Create(
+                rootPart,
+                TweenInfo.new(0.5/bounceSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+                {Position = currentPos}
+            )
+            downTween:Play()
+        end
+    end)
+end
+
+-- Function to enable script
+local function enableScript()
+    if not BASE_CENTER or not savedPosition then
+        -- Set base center to current player position
+        BASE_CENTER = rootPart.Position
+        savedPosition = BASE_CENTER
+        updateWallPositions()
+    end
+    
+    scriptEnabled = true
+    humanoid.PlatformStand = true
+    
+    -- Move to starting position
+    local startPosition = getWallPosition(currentSide)
+    rootPart.Position = startPosition
+    
+    -- Start the heartbeat connection
+    if connection then
+        connection:Disconnect()
+    end
+    connection = RunService.Heartbeat:Connect(onHeartbeat)
+end
+
+-- Function to disable script
+local function disableScript()
+    scriptEnabled = false
+    humanoid.PlatformStand = false
+    
+    if connection then
+        connection:Disconnect()
+        connection = nil
+    end
+end
+
+-- Function to save current position
+local function saveCurrentPosition()
+    BASE_CENTER = rootPart.Position
+    savedPosition = BASE_CENTER
+    updateWallPositions()
+end
+
+-- Function to change to current position
+local function changeToCurrentPosition()
+    saveCurrentPosition()
+    if scriptEnabled then
+        -- Move to new wall position
+        local newPosition = getWallPosition(currentSide)
+        rootPart.Position = newPosition
+    end
+end
+
+-- Main loop
+local function onHeartbeat()
+    if not scriptEnabled or not isMoving then
+        if scriptEnabled then
+            -- Check for nearby players
+            if checkForNearbyPlayers() then
+                moveToOppositeSide()
+            else
+                -- Check if player is not at saved position and no players nearby
+                local distanceFromSaved = (rootPart.Position - savedPosition).Magnitude
+                if distanceFromSaved > 2 then -- Allow some tolerance
+                    returnToSavedPosition()
+                else
+                    -- Continue bouncing at saved position
+                    createBounceEffect()
+                end
+            end
+        end
+    end
+end
+
+-- Initialize GUI and connect events
+local gui, onOffButton, savePositionButton, changePositionButton = createGUI()
+
+-- Connect button events
+onOffButton.MouseButton1Click:Connect(function()
+    if scriptEnabled then
+        disableScript()
+        onOffButton.Text = "OFF"
+        onOffButton.BackgroundColor3 = Color3.new(0.8, 0.2, 0.2)
+    else
+        enableScript()
+        onOffButton.Text = "ON"
+        onOffButton.BackgroundColor3 = Color3.new(0.2, 0.8, 0.2)
+    end
+end)
+
+savePositionButton.MouseButton1Click:Connect(function()
+    saveCurrentPosition()
+end)
+
+changePositionButton.MouseButton1Click:Connect(function()
+    changeToCurrentPosition()
+end)
+
+-- Start the script
+-- initialize() -- Remove this as GUI controls the script now
+
+-- Connect to heartbeat for continuous checking
+-- local connection = RunService.Heartbeat:Connect(onHeartbeat) -- Remove this as it's handled in enableScript()
+
+-- Cleanup function
+local function cleanup()
+    if connection then
+        connection:Disconnect()
+        connection = nil
+    end
+    humanoid.PlatformStand = false
+    if gui then
+        gui:Destroy()
+    end
+end
+
+-- Handle character respawn
+player.CharacterAdded:Connect(function(newCharacter)
+    character = newCharacter
+    humanoid = character:WaitForChild("Humanoid")
+    rootPart = character:WaitForChild("HumanoidRootPart")
+    
+    -- Recreate GUI for new character
+    if gui then
+        gui:Destroy()
+    end
+    gui, onOffButton, savePositionButton, changePositionButton = createGUI()
+    
+    -- Reconnect button events
+    onOffButton.MouseButton1Click:Connect(function()
+        if scriptEnabled then
+            disableScript()
+            onOffButton.Text = "OFF"
+            onOffButton.BackgroundColor3 = Color3.new(0.8, 0.2, 0.2)
+        else
+            enableScript()
+            onOffButton.Text = "ON"
+            onOffButton.BackgroundColor3 = Color3.new(0.2, 0.8, 0.2)
+        end
+    end)
+    
+    savePositionButton.MouseButton1Click:Connect(function()
+        saveCurrentPosition()
+    end)
+    
+    changePositionButton.MouseButton1Click:Connect(function()
+        changeToCurrentPosition()
+    end)
+end)
+
+-- Optional: Add cleanup when player leaves
+Players.PlayerRemoving:Connect(function(removingPlayer)
+    if removingPlayer == player then
+        cleanup()
+    end
+end)
